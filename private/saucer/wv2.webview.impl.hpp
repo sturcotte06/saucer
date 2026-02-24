@@ -68,6 +68,7 @@ namespace saucer
         std::size_t id_counter{0};
         std::map<std::size_t, wv2_script> scripts;
         std::unordered_map<std::string, scheme::resolver> schemes;
+        std::unordered_map<uint64_t, saucer::url> navigation_ids;
 
       public:
         std::size_t on_resize, on_minimize;

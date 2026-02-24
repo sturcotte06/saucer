@@ -162,14 +162,27 @@ namespace saucer
             return;
         }
 
-        static constexpr auto fire = [](impl *self)
+        static constexpr auto fire = [](const state state, const saucer::url& url, impl *self)
         {
-            self->events.get<event::load>().fire(state::finished);
+            self->events.get<event::load>().fire(state, url);
         };
 
-        auto handler = [self](auto...)
+        auto handler = [self](ICoreWebView2 *, ICoreWebView2NavigationCompletedEventArgs *args)
         {
-            self->parent->post(utils::defer(self->platform->lease, fire));
+            UINT64 navigation_id;
+            args->get_NavigationId(&navigation_id);
+
+            const auto it = self->platform->navigation_ids.find(navigation_id);
+
+            if (it != self->platform->navigation_ids.end())
+            {
+                BOOL success;
+                args->get_IsSuccess(&success);
+
+                const state state = success ? state::finished : state::failed;
+                self->parent->post(utils::defer(self->platform->lease, std::bind_front(fire, state, it->second)));
+            }
+
             return S_OK;
         };
 
@@ -331,9 +344,24 @@ namespace saucer
 
     HRESULT native::on_navigation(impl *self, ICoreWebView2 *, ICoreWebView2NavigationStartingEventArgs *args)
     {
-        static constexpr auto fire = [](impl *self)
+        UINT64 navigation_id;
+        args->get_NavigationId(&navigation_id);
+
+        LPWSTR navigation_url;
+        args->get_Uri(&navigation_url);
+
+        auto url = saucer::url::parse(utils::narrow(navigation_url));
+
+        if (!url.has_value())
         {
-            self->events.get<event::load>().fire(state::started);
+            return S_OK;
+        }
+
+        const auto [it, _] = self->platform->navigation_ids.emplace(navigation_id, std::move(url.value()));
+
+        static constexpr auto fire = [](const saucer::url& url, impl *self)
+        {
+            self->events.get<event::load>().fire(state::started, url);
         };
 
         auto nav = navigation{navigation::impl{
@@ -346,7 +374,7 @@ namespace saucer
             return S_OK;
         }
 
-        self->parent->post(utils::defer(self->platform->lease, fire));
+        self->parent->post(utils::defer(self->platform->lease, std::bind_front(fire, it->second)));
 
         return S_OK;
     }
